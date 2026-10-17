@@ -209,6 +209,62 @@ extension (step 1 below) and add the printed MCP config to Claude Code.
    }
    ```
 
+### Claude desktop app
+
+The same stdio server works in the Claude desktop app (claude.ai desktop),
+not just Claude Code. The install script prints a ready-to-paste block with
+your paths filled in. To set it up by hand, edit the desktop config file:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+and add a `claudecodebrowser` entry under `mcpServers` (keep any servers
+already listed there):
+
+```json
+{
+  "mcpServers": {
+    "claudecodebrowser": {
+      "command": "/Users/YOUR_USER/miniconda3/bin/python3",
+      "args": ["/Users/YOUR_USER/.claudecodebrowser/mcp-server/stdio_wrapper.py"]
+    }
+  }
+}
+```
+
+On Windows use forward slashes or escaped backslashes, for example
+`"C:/Users/YOUR_USER/AppData/Local/Programs/Python/Python312/python.exe"`
+and `"C:/Users/YOUR_USER/.claudecodebrowser/mcp-server/stdio_wrapper.py"`.
+
+> **Use the absolute path to `python3`, not plain `python3`.** The desktop
+> app does not start from your shell, so it does not see your shell `PATH`
+> and may pick a different Python (or none). Use the interpreter that has
+> `websockets` installed: run `which python3` (Windows: `where python`) in
+> the shell where `python3 -c "import websockets"` succeeds. Conda
+> (`~/miniconda3/bin/python3`, `~/anaconda3/bin/python3`), Homebrew
+> (`/opt/homebrew/bin/python3` on Apple Silicon, `/usr/local/bin/python3` on
+> Intel) and the system Python (`/usr/bin/python3`) are all different
+> interpreters with different packages.
+>
+> **Double-check the username in both paths.** `~` is not expanded in this
+> file, so paths must be spelled out in full, and a copied example with the
+> wrong user name fails silently.
+
+After editing, **fully quit** the desktop app (macOS: Cmd+Q, Windows: quit
+from the tray icon). Closing the window is not enough. Then reopen it. The
+browser tools appear under the tools/connectors menu. If they don't, check
+the app's MCP log (macOS: `~/Library/Logs/Claude/mcp-server-claudecodebrowser.log`).
+
+**Screenshots** come back as real images the model can see, plus a short
+text block with the tab, URL, saved file path and dimensions. Large captures
+are downscaled to 1600px on the long edge (or re-encoded as JPEG) to stay
+under ~1 MB. That needs [Pillow](https://pypi.org/project/Pillow/)
+(`python3 -m pip install Pillow` with the same python3 as above). Without it,
+images are returned at their original size. Base64 image data and `data:`
+URIs are never included in text results. To turn off image blocks (results
+then carry only the saved file path), set `CLAUDE_BROWSER_MCP_IMAGES=0` in
+the server's `env`.
+
 ## Updating the Firefox Extension
 
 The MCP server and native host are plain Python — pull the repo and restart
@@ -434,7 +490,7 @@ agent.fill_form({
 #### Core Navigation & Screenshots
 | Tool | Description |
 |------|-------------|
-| `browser_screenshot` | Take a screenshot (visible area or full page) |
+| `browser_screenshot` | Take a screenshot (visible area or full page). Returned to MCP clients as an image |
 | `browser_navigate` | Navigate to a URL, optionally in new tab |
 | `browser_go_back` | Navigate back in tab history |
 | `browser_go_forward` | Navigate forward in tab history |

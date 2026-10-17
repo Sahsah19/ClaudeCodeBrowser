@@ -43,7 +43,10 @@ if ! command -v python3 &> /dev/null; then
 fi
 
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo -e "${GREEN}✓ Python $PYTHON_VERSION found${NC}"
+# Absolute path of the interpreter, for clients that don't inherit the shell
+# PATH (Firefox native hosts, the Claude desktop app).
+PYTHON_BIN="$(command -v python3)"
+echo -e "${GREEN}✓ Python $PYTHON_VERSION found at $PYTHON_BIN${NC}"
 
 # Check for Firefox
 if command -v firefox &> /dev/null; then
@@ -91,7 +94,6 @@ if [ "$OS" = "Darwin" ]; then
     # Firefox on macOS launches native hosts with a minimal PATH (launchd's),
     # so "#!/usr/bin/env python3" may not resolve (e.g. Homebrew installs).
     # Use a launcher with the absolute python3 path resolved at install time.
-    PYTHON_BIN="$(command -v python3)"
     cat > "$INSTALL_DIR/native-host/run_host.sh" << WRAPEOF
 #!/bin/bash
 exec "$PYTHON_BIN" "$INSTALL_DIR/native-host/claudecodebrowser_host.py"
@@ -151,6 +153,15 @@ else
     pip3 install --user websockets || echo -e "${YELLOW}⚠ Could not install websockets (WebSocket support will be disabled)${NC}"
 fi
 
+# Pillow is optional: it lets screenshots be downscaled before they are sent
+# to the model as images.
+if python3 -c "import PIL" 2>/dev/null; then
+    echo -e "${GREEN}✓ Pillow found (large screenshots will be downscaled)${NC}"
+else
+    echo -e "${YELLOW}⚠ Pillow not found (optional). Large screenshots will be sent at full size.${NC}"
+    echo "  To enable downscaling: \"$PYTHON_BIN\" -m pip install Pillow"
+fi
+
 # Print Firefox extension installation instructions
 echo -e "\n${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${YELLOW}Firefox Extension Installation:${NC}"
@@ -187,6 +198,47 @@ echo '{
     }
   }
 }'
+echo ""
+echo "Or with the CLI:"
+echo "  claude mcp add claudecodebrowser -- \"$PYTHON_BIN\" \"$INSTALL_DIR/mcp-server/stdio_wrapper.py\""
+echo ""
+
+# Print Claude desktop app configuration
+if [ "$OS" = "Darwin" ]; then
+    DESKTOP_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+else
+    DESKTOP_CONFIG="$HOME/.config/Claude/claude_desktop_config.json"
+fi
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${YELLOW}Claude Desktop App Configuration:${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+echo "Add this entry under \"mcpServers\" in:"
+echo "  $DESKTOP_CONFIG"
+echo "(keep any other servers already listed there):"
+echo ""
+cat << DESKTOPEOF
+    "claudecodebrowser": {
+      "command": "$PYTHON_BIN",
+      "args": ["$INSTALL_DIR/mcp-server/stdio_wrapper.py"]
+    }
+DESKTOPEOF
+echo ""
+echo "If the file doesn't exist yet, create it with:"
+echo ""
+cat << DESKTOPEOF
+{
+  "mcpServers": {
+    "claudecodebrowser": {
+      "command": "$PYTHON_BIN",
+      "args": ["$INSTALL_DIR/mcp-server/stdio_wrapper.py"]
+    }
+  }
+}
+DESKTOPEOF
+echo ""
+echo "The python path above must be the one with 'websockets' installed."
+echo "Then fully quit the Claude desktop app (Cmd+Q, or quit from the tray) and reopen it."
 echo ""
 
 # Print usage instructions

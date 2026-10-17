@@ -4,6 +4,32 @@ All notable changes to ClaudeCodeBrowser are documented here. Versions follow
 [semantic versioning](https://semver.org/). The MCP server, extension, and
 docs are versioned together.
 
+## [Unreleased]
+
+### Added
+- **Screenshots as MCP image blocks.** `browser_screenshot`,
+  `browser_screenshot_all_tabs` (with `include_data`), `browser_audit_page`
+  and failing `browser_run_workflow` steps now return the screenshot as an
+  MCP `image` content block the model can see, plus a short text block with
+  tab id, URL, saved file path and dimensions. Images over 1600px on the long
+  edge or ~1 MB of base64 are downscaled / re-encoded as JPEG (needs Pillow;
+  without it the original is returned and the text says so). Set
+  `CLAUDE_BROWSER_MCP_IMAGES=0` to turn image blocks off.
+- **Claude desktop app support:** README section with a
+  `claude_desktop_config.json` example; `install.sh` / `install.ps1` print a
+  ready-to-paste desktop config block with the detected python path.
+- `mcp-server/tests/test_stdio_wrapper.py`: end-to-end MCP stdio tests
+  against a fake backend.
+
+### Fixed
+- Base64 / `data:` URIs no longer leak into MCP text results. They are
+  replaced with a short `[data URI omitted: …]` note.
+- `browser_get_tabs` drops `favIconUrl` unless `include_favicon` is true,
+  even with older extension builds that always sent it.
+- `browser_get_tabs` options `include_favicon`, `url_pattern` and
+  `current_window_only` are now actually honoured by the extension (the
+  server sent camelCase keys; `getAllTabs` reads snake_case).
+
 ## [1.4.0]
 
 ### Added

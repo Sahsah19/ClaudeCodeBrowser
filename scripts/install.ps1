@@ -113,6 +113,40 @@ Write-Host "=============================================================="
 Write-Host ""
 Write-Host "  claude mcp add claudecodebrowser -- `"$Python`" `"$InstallDir\mcp-server\stdio_wrapper.py`""
 Write-Host ""
+
+# --- Claude desktop app -------------------------------------------------
+
+$DesktopConfig = Join-Path $env:APPDATA "Claude\claude_desktop_config.json"
+# ConvertTo-Json escapes the backslashes in Windows paths correctly.
+$DesktopEntry = [ordered]@{
+    mcpServers = [ordered]@{
+        claudecodebrowser = [ordered]@{
+            command = $Python
+            args = @((Join-Path $InstallDir "mcp-server\stdio_wrapper.py"))
+        }
+    }
+}
+Write-Host "=============================================================="
+Write-Host "Claude Desktop App Configuration:"
+Write-Host "=============================================================="
+Write-Host ""
+Write-Host "Add the claudecodebrowser entry under `"mcpServers`" in:"
+Write-Host "  $DesktopConfig"
+Write-Host "(keep any other servers already listed there; create the file if missing):"
+Write-Host ""
+Write-Host ($DesktopEntry | ConvertTo-Json -Depth 5)
+Write-Host ""
+Write-Host "The python path above must be the one with 'websockets' installed."
+Write-Host "Then fully quit the Claude desktop app (quit from the tray icon) and reopen it."
+Write-Host ""
+
+# find_spec writes nothing to stderr, which matters under ErrorActionPreference=Stop.
+& $Python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PIL') else 1)"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[warn] Pillow not found (optional). Large screenshots will be sent at full size." -ForegroundColor Yellow
+    Write-Host "       To enable downscaling: & `"$Python`" -m pip install Pillow"
+    Write-Host ""
+}
 Write-Host "+--------------------------------------------------------------+"
 Write-Host "|       Installation complete!                                 |"
 Write-Host "+--------------------------------------------------------------+"
