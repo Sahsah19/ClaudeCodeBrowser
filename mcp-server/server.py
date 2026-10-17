@@ -125,6 +125,19 @@ def camelize_args(arguments: Dict[str, Any]) -> Dict[str, Any]:
     return {camel(k): v for k, v in arguments.items()}
 
 
+# Extension handlers that read the original snake_case keys instead of the
+# camelized ones (getAllTabs in background.js reads include_favicon,
+# current_window_only and url_pattern). Send both spellings to them.
+_SNAKE_CASE_ACTIONS = {'getTabs'}
+
+
+def extension_args(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    data = camelize_args(arguments)
+    if action in _SNAKE_CASE_ACTIONS:
+        data.update(arguments)
+    return data
+
+
 @dataclass
 class BrowserCommand:
     """Represents a command to be sent to the browser."""
@@ -146,7 +159,7 @@ class MCPTool:
 MCP_TOOLS: List[MCPTool] = [
     MCPTool(
         name="browser_screenshot",
-        description="Take a screenshot of the current browser tab or a specific tab. Returns base64 encoded PNG image.",
+        description="Take a screenshot of the current browser tab or a specific tab. Over MCP the screenshot is returned as an image you can see (downscaled if very large), plus a short text block with the tab, URL and saved file path.",
         input_schema={
             "type": "object",
             "properties": {
@@ -328,7 +341,7 @@ MCP_TOOLS: List[MCPTool] = [
             "type": "object",
             "properties": {
                 "url_pattern": {"type": "string", "description": "Regex pattern to filter which tabs to screenshot."},
-                "include_data": {"type": "boolean", "description": "Include base64 image data in response (large).", "default": False}
+                "include_data": {"type": "boolean", "description": "Return the screenshots themselves (as images over MCP, base64 over HTTP). Otherwise only per-tab status is returned.", "default": False}
             }
         }
     ),
@@ -1143,7 +1156,7 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
             command = BrowserCommand(
                 action=action,
                 tab_id=tab_id,
-                data=camelize_args(arguments)
+                data=extension_args(action, arguments)
             )
 
             # We run in a ThreadingHTTPServer worker thread, which owns no
@@ -1214,7 +1227,7 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
         command_data = {
             'action': action,
             'tabId': tab_id,
-            'data': camelize_args(arguments),
+            'data': extension_args(action, arguments),
             'requestId': request_id
         }
 
