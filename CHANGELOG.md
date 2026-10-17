@@ -4,9 +4,25 @@ All notable changes to ClaudeCodeBrowser are documented here. Versions follow
 [semantic versioning](https://semver.org/). The MCP server, extension, and
 docs are versioned together.
 
-## [Unreleased]
+## [1.5.0]
 
 ### Added
+- **Agent workspace**: the agent works in its own "Claude" tab group
+  (`tabs.group()` + `tabGroups`, Firefox 138+), or a separate unfocused
+  window on older Firefox. `browser_create_workspace` /
+  `browser_close_workspace` tools; the workspace is also created
+  implicitly on first use. Tabs dragged into the group are shared with the
+  agent.
+- New agent tabs (`browser_create_tab`, `browser_navigate` with `new_tab`)
+  open in the workspace in the background (`active: false`).
+- Tools without a `tab_id` act on the workspace's current tab, never the
+  user's active tab. `browser_reload_all`, `browser_reload_by_url` and
+  `browser_screenshot_all_tabs` stay in the workspace unless
+  `include_user_tabs: true`.
+- Screenshots of background tabs use `tabs.captureTab` (no tab or focus
+  switch). If it is unavailable, the tab is activated briefly and the user's
+  previous tab and window are restored afterwards.
+- Manifest: `tabGroups` permission.
 - **Screenshots as MCP image blocks.** `browser_screenshot`,
   `browser_screenshot_all_tabs` (with `include_data`), `browser_audit_page`
   and failing `browser_run_workflow` steps now return the screenshot as an
@@ -26,6 +42,10 @@ docs are versioned together.
   replaced with a short `[data URI omitted: …]` note.
 - `browser_get_tabs` drops `favIconUrl` unless `include_favicon` is true,
   even with older extension builds that always sent it.
+- `browser_navigate` with `new_tab: true` now opens a new tab instead of
+  reusing the active one (the extension ignored the flag).
+- Full-page screenshots now return an image (via `captureTab` with a rect)
+  instead of failing on the page-dimensions object.
 - `browser_get_tabs` options `include_favicon`, `url_pattern` and
   `current_window_only` are now actually honoured by the extension (the
   server sent camelCase keys; `getAllTabs` reads snake_case).

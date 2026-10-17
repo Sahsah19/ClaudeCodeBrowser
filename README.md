@@ -403,6 +403,49 @@ The server runs on:
 - HTTP: http://127.0.0.1:8765
 - WebSocket: ws://127.0.0.1:8766
 
+### Agent Workspace
+
+Like Claude in Chrome's tab group, the agent works in its own **"Claude"
+workspace** and leaves your tabs alone:
+
+- **Tab group** (Firefox 138+): an orange "Claude" tab group in your current
+  window. On older Firefox, or with `mode: "window"`, the workspace is a
+  separate window opened without taking focus.
+- **Created on first use.** Any tool that needs a page creates the workspace
+  if there isn't one. Call `browser_create_workspace` to choose the mode or
+  the first URL yourself.
+- **New agent tabs open in the background.** `browser_create_tab` and
+  `browser_navigate` with `new_tab: true` add a tab to the workspace with
+  `active: false`, so your view doesn't change. `new_tab: true` now always
+  opens a new tab (it used to reuse the active one).
+- **Tools never act on your tabs by default.** Without a `tab_id`, page
+  tools (click, type, screenshot, navigate, ...) use the workspace's current
+  tab: the one the agent created or targeted most recently.
+  `browser_reload_all`, `browser_reload_by_url` and
+  `browser_screenshot_all_tabs` only touch workspace tabs unless
+  `include_user_tabs: true` is passed. To work on one of your own tabs, the
+  agent passes its id (from `browser_get_tabs`) as `tab_id`.
+- **Sharing a tab:** drag one of your tabs into the Claude group and the
+  agent can use it. Drag it out and the agent no longer treats it as part of the workspace.
+- **Screenshots without interruptions.** Background tabs are captured with
+  Firefox's `tabs.captureTab`, which needs no tab switch. If that fails, the
+  extension briefly activates the tab, captures it, then restores your
+  previous tab and window focus. Full-page screenshots also go through
+  `captureTab` now (capped at 16000px tall).
+- **Closing:** `browser_close_workspace` closes the workspace's tabs (or its
+  window). With `keep_tabs: true` it ungroups them and leaves them open.
+  Closing the group or window yourself also ends the workspace. The next
+  agent command starts a new one.
+
+`browser_get_tabs` lists the current window plus every workspace tab. Each
+tab has an `inWorkspace` flag, and the result includes a `workspace` object
+with the mode, tab ids and current tab.
+
+Workspace state lives in the extension's background page. If the extension
+is reloaded, it forgets the old group; the next command starts a new one.
+In headless mode the whole headless browser is already agent-only, so the
+workspace tools just report that.
+
 ### Headless Mode
 
 Run without any visible browser — ideal for CI, servers, and unattended tasks:
@@ -491,13 +534,13 @@ agent.fill_form({
 | Tool | Description |
 |------|-------------|
 | `browser_screenshot` | Take a screenshot (visible area or full page). Returned to MCP clients as an image |
-| `browser_navigate` | Navigate to a URL, optionally in new tab |
+| `browser_navigate` | Navigate to a URL in the workspace tab, or a new background workspace tab with `new_tab` |
 | `browser_go_back` | Navigate back in tab history |
 | `browser_go_forward` | Navigate forward in tab history |
 | `browser_refresh` | Refresh current page |
 | `browser_hard_refresh` | Force refresh bypassing cache (Ctrl+Shift+R) |
-| `browser_reload_all` | Reload all browser tabs |
-| `browser_reload_by_url` | Reload tabs matching URL pattern |
+| `browser_reload_all` | Reload workspace tabs (`include_user_tabs` for all tabs) |
+| `browser_reload_by_url` | Reload workspace tabs matching a URL pattern (`include_user_tabs` for all tabs) |
 
 #### Element Interaction
 | Tool | Description |
@@ -523,8 +566,10 @@ agent.fill_form({
 #### Tab Management
 | Tool | Description |
 |------|-------------|
-| `browser_get_tabs` | List all open browser tabs |
-| `browser_create_tab` | Create a new tab |
+| `browser_get_tabs` | List open tabs, flagging agent workspace tabs |
+| `browser_create_workspace` | Open the agent's "Claude" tab group (or window); automatic on first use |
+| `browser_close_workspace` | Close the agent workspace and its tabs (`keep_tabs` to leave them open) |
+| `browser_create_tab` | Create a background tab in the agent workspace |
 | `browser_close_tab` | Close a tab by ID |
 | `browser_focus_tab` | Focus/activate a tab by ID |
 
