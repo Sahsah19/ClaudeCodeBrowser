@@ -146,8 +146,23 @@ class HeadlessBrowser:
 
         if action == 'navigate':
             url = args.get('url', '')
+            new_id = None
+            if args.get('new_tab'):
+                page = await self._context.new_page()
+                self._page = page
+                new_id = self._register_tab(page)
             await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-            return {'success': True, 'url': page.url, 'title': await page.title()}
+            result = {'success': True, 'url': page.url, 'title': await page.title()}
+            if new_id is not None:
+                result.update(tabId=new_id, newTab=True)
+            return result
+
+        elif action in ('createWorkspace', 'closeWorkspace'):
+            # The headless browser is already a separate, agent-only browser,
+            # so it is the workspace; there are no user tabs to protect.
+            return {'success': True, 'workspace': {'exists': True, 'mode': 'headless',
+                                                   'tabIds': list(self._tabs)},
+                    'note': 'Headless mode: the whole headless browser is the agent workspace.'}
 
         elif action == 'screenshot':
             from datetime import datetime

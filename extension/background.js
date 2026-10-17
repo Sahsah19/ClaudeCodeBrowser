@@ -100,8 +100,8 @@ function handleNativeMessage(message) {
       resolve(message);
     }
   } else if (message.action) {
-    // Handle incoming commands from native host
-    handleCommand(message);
+    // Handle incoming commands from native host (i.e. from the MCP server)
+    handleCommand(message, { fromAgent: true });
   }
 }
 
@@ -178,13 +178,285 @@ function sendToNativeHost(message, retryCount = 0) {
   });
 }
 
-// Handle commands from native host
-async function handleCommand(message) {
-  const { action, tabId, data } = message;
+// ---------------------------------------------------------------------------
+// Agent workspace
+//
+// Like Claude in Chrome's tab group: the agent works in its own "Claude" tab
+// group (or, on Firefox without tab-group support, its own window). Commands
+// from the MCP server that don't name a tab act on the workspace's current
+// tab, never on whatever tab the user happens to be looking at. New agent tabs
+// open in the workspace in the background.
+// ---------------------------------------------------------------------------
+
+const WORKSPACE_TITLE = "Claude";
+const WORKSPACE_COLOR = "orange";
+
+const workspace = {
+  mode: null,          // "group" | "window" | null when there is no workspace
+  groupId: null,       // group mode
+  windowId: null,      // window mode: the dedicated window
+  tabIds: new Set(),
+  activeTabId: null    // the tab agent commands default to
+};
+
+// Actions that don't operate on a single page, so no default tab is filled in.
+const NON_TAB_ACTIONS = new Set([
+  "getTabs", "findTabs", "createTab", "closeTab", "focusTab", "getTabInfo",
+  "reloadAll", "reloadByUrl", "screenshotAllTabs",
+  "createWorkspace", "closeWorkspace", "status", "ping"
+]);
+
+function supportsTabGroups() {
+  return typeof browser.tabs.group === "function";
+}
+
+function resetWorkspace() {
+  workspace.mode = null;
+  workspace.groupId = null;
+  workspace.windowId = null;
+  workspace.tabIds.clear();
+  workspace.activeTabId = null;
+}
+
+function workspaceInfo() {
+  return {
+    exists: workspace.mode !== null,
+    mode: workspace.mode,
+    groupId: workspace.groupId,
+    windowId: workspace.windowId,
+    tabIds: [...workspace.tabIds],
+    activeTabId: workspace.activeTabId
+  };
+}
+
+// Drop tabs that no longer exist; returns true if a workspace is still usable.
+async function pruneWorkspace() {
+  if (workspace.mode === null) return false;
+  for (const id of [...workspace.tabIds]) {
+    try {
+      await browser.tabs.get(id);
+    } catch (e) {
+      workspace.tabIds.delete(id);
+    }
+  }
+  if (workspace.tabIds.size === 0) {
+    resetWorkspace();
+    return false;
+  }
+  if (!workspace.tabIds.has(workspace.activeTabId)) {
+    workspace.activeTabId = [...workspace.tabIds].pop();
+  }
+  return true;
+}
+
+async function lastFocusedNormalWindow() {
+  try {
+    return await browser.windows.getLastFocused({ windowTypes: ["normal"] });
+  } catch (e) {
+    return null;
+  }
+}
+
+async function labelGroup(groupId) {
+  // tabGroups.update needs Firefox 139+ and the "tabGroups" permission; the
+  // group works without a title, so failures are ignored.
+  try {
+    if (browser.tabGroups && browser.tabGroups.update) {
+      await browser.tabGroups.update(groupId, { title: WORKSPACE_TITLE, color: WORKSPACE_COLOR });
+    }
+  } catch (e) {
+    console.warn("[ClaudeCodeBrowser] Could not label workspace group:", e);
+  }
+}
+
+async function createWorkspaceWindow(url, previousWindow) {
+  const win = await browser.windows.create({ url, focused: false });
+  // Some Firefox versions focus new windows regardless; hand focus back.
+  if (previousWindow && previousWindow.focused) {
+    try {
+      await browser.windows.update(previousWindow.id, { focused: true });
+    } catch (e) { /* window may be gone */ }
+  }
+  workspace.mode = "window";
+  workspace.windowId = win.id;
+  workspace.groupId = null;
+  const tabs = win.tabs || await browser.tabs.query({ windowId: win.id });
+  tabs.forEach(t => workspace.tabIds.add(t.id));
+  workspace.activeTabId = tabs[0].id;
+  return tabs[0];
+}
+
+async function createWorkspace(data = {}) {
+  if (await pruneWorkspace()) {
+    return { success: true, created: false, workspace: workspaceInfo() };
+  }
+  const url = data.url || "about:blank";
+  const wantMode = data.mode || "auto";
+  const previousWindow = await lastFocusedNormalWindow();
+  let tab;
+  let note;
+
+  if (wantMode !== "window" && supportsTabGroups()) {
+    const createOpts = { url, active: false };
+    if (previousWindow) createOpts.windowId = previousWindow.id;
+    tab = await browser.tabs.create(createOpts);
+    try {
+      const groupId = await browser.tabs.group({ tabIds: [tab.id] });
+      await labelGroup(groupId);
+      workspace.mode = "group";
+      workspace.groupId = groupId;
+      workspace.windowId = null;
+      workspace.tabIds.add(tab.id);
+      workspace.activeTabId = tab.id;
+    } catch (e) {
+      // Grouping failed (e.g. private window restrictions): use a window.
+      note = `Tab groups unavailable (${e.message}); using a separate window.`;
+      await browser.tabs.remove(tab.id).catch(() => {});
+      tab = await createWorkspaceWindow(url, previousWindow);
+    }
+  } else {
+    if (wantMode === "group") {
+      note = "This Firefox has no tab group support (needs Firefox 138+); using a separate window.";
+    }
+    tab = await createWorkspaceWindow(url, previousWindow);
+  }
+
+  const result = {
+    success: true,
+    created: true,
+    workspace: workspaceInfo(),
+    tab: { id: tab.id, url: tab.url, title: tab.title }
+  };
+  if (note) result.note = note;
+  return result;
+}
+
+async function ensureWorkspace() {
+  if (await pruneWorkspace()) return;
+  await createWorkspace({});
+}
+
+// Open a new background tab inside the workspace (creating it if needed).
+async function openWorkspaceTab(url = "about:blank") {
+  if (!(await pruneWorkspace())) {
+    const created = await createWorkspace({ url });
+    return browser.tabs.get(created.tab.id);
+  }
+
+  let tab;
+  if (workspace.mode === "group") {
+    const anchor = await browser.tabs.get(workspace.activeTabId);
+    tab = await browser.tabs.create({ url, active: false, windowId: anchor.windowId });
+    try {
+      await browser.tabs.group({ groupId: workspace.groupId, tabIds: [tab.id] });
+    } catch (e) {
+      // The group vanished (e.g. the user ungrouped it): start a new one.
+      workspace.groupId = await browser.tabs.group({ tabIds: [tab.id, ...workspace.tabIds] });
+      await labelGroup(workspace.groupId);
+    }
+  } else {
+    tab = await browser.tabs.create({ url, active: false, windowId: workspace.windowId });
+  }
+  workspace.tabIds.add(tab.id);
+  workspace.activeTabId = tab.id;
+  return tab;
+}
+
+async function closeWorkspace(data = {}) {
+  if (!(await pruneWorkspace())) {
+    return { success: true, closed: false, note: "No workspace was open." };
+  }
+  const ids = [...workspace.tabIds];
+  const info = workspaceInfo();
+  if (data.keepTabs) {
+    if (workspace.mode === "group" && browser.tabs.ungroup) {
+      await browser.tabs.ungroup(ids).catch(() => {});
+    }
+    resetWorkspace();
+    return { success: true, closed: false, keptTabIds: ids, workspace: info };
+  }
+  if (workspace.mode === "window") {
+    await browser.windows.remove(workspace.windowId).catch(() => {});
+  } else {
+    await browser.tabs.remove(ids).catch(() => {});
+  }
+  resetWorkspace();
+  return { success: true, closed: true, closedTabIds: ids, workspace: info };
+}
+
+// Fill in the tab an agent command acts on. An explicit tabId always wins;
+// otherwise the workspace's current tab is used (created on first use).
+async function resolveAgentTabId(action, tabId, data = {}) {
+  if (tabId) {
+    if (workspace.tabIds.has(tabId)) workspace.activeTabId = tabId;
+    return tabId;
+  }
+  if (NON_TAB_ACTIONS.has(action)) return tabId;
+  // navigate(new_tab) opens its own workspace tab; don't create a blank one first.
+  if (action === "navigate" && data && data.newTab) return tabId;
+  await ensureWorkspace();
+  return workspace.activeTabId;
+}
+
+// Tabs that multi-tab tools may touch: the workspace's, unless the caller
+// explicitly opts into the user's tabs.
+async function scopedTabs(options = {}) {
+  const tabs = await browser.tabs.query({});
+  if (options.includeUserTabs) return tabs;
+  await pruneWorkspace();
+  return tabs.filter(t => workspace.tabIds.has(t.id));
+}
+
+// Keep membership in sync with what happens in the browser.
+browser.tabs.onRemoved.addListener((tabId) => {
+  if (!workspace.tabIds.delete(tabId)) return;
+  if (workspace.tabIds.size === 0) {
+    resetWorkspace();
+  } else if (workspace.activeTabId === tabId) {
+    workspace.activeTabId = [...workspace.tabIds].pop();
+  }
+});
+
+browser.windows.onRemoved.addListener((windowId) => {
+  if (workspace.mode === "window" && workspace.windowId === windowId) {
+    resetWorkspace();
+  }
+});
+
+// Group mode: dragging a tab into the Claude group shares it with the agent;
+// dragging one out takes it back.
+browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (workspace.mode !== "group" || changeInfo.groupId === undefined) return;
+  if (changeInfo.groupId === workspace.groupId) {
+    workspace.tabIds.add(tabId);
+  } else if (workspace.tabIds.has(tabId)) {
+    workspace.tabIds.delete(tabId);
+    if (workspace.tabIds.size === 0) {
+      resetWorkspace();
+    } else if (workspace.activeTabId === tabId) {
+      workspace.activeTabId = [...workspace.tabIds].pop();
+    }
+  }
+});
+
+// Handle commands from native host. Commands from the MCP server (fromAgent)
+// are scoped to the agent workspace; popup/content-script messages are not.
+async function handleCommand(message, { fromAgent = false } = {}) {
+  const { action, data } = message;
+  let { tabId } = message;
   let result = { success: false };
 
   try {
+    if (fromAgent) {
+      tabId = await resolveAgentTabId(action, tabId, data);
+    }
     switch (action) {
+      case "createWorkspace":
+        result = await createWorkspace(data);
+        break;
+      case "closeWorkspace":
+        result = await closeWorkspace(data);
+        break;
       case "screenshot":
         result = await takeScreenshot(tabId, data);
         break;
@@ -318,109 +590,124 @@ async function handleCommand(message) {
 // Screenshot functionality
 async function takeScreenshot(tabId, options = {}) {
   try {
-    const currentTab = (await browser.tabs.query({ active: true, currentWindow: true }))[0];
-    const targetTab = tabId ? await browser.tabs.get(tabId) : currentTab;
-
-    // Check if we need to temporarily focus the tab for screenshot
-    const needsFocus = tabId && tabId !== currentTab?.id;
-    let originalActiveTab = null;
-
-    if (needsFocus && options.allowFocus !== false) {
-      // Store original active tab to restore later
-      originalActiveTab = currentTab;
-
-      // Focus the target tab temporarily
-      await browser.tabs.update(targetTab.id, { active: true });
-
-      // Small delay to let the tab render
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
-
-    try {
-      const dataUrl = await browser.tabs.captureVisibleTab(targetTab.windowId, {
-        format: options.format || "png",
-        quality: options.quality || 90
-      });
-
-      // If full page screenshot requested, use content script
-      if (options.fullPage) {
-        const fullPageData = await browser.tabs.sendMessage(targetTab.id, {
-          action: "captureFullPage",
-          format: options.format || "png"
-        });
-        return { success: true, data: fullPageData, type: "fullPage" };
-      }
-
-      return {
-        success: true,
-        data: dataUrl,
-        type: "visible",
-        tab: { id: targetTab.id, url: targetTab.url, title: targetTab.title },
-        wasFocused: needsFocus
-      };
-    } finally {
-      // Restore original tab if we changed focus
-      if (originalActiveTab && options.restoreFocus !== false) {
-        await browser.tabs.update(originalActiveTab.id, { active: true });
-      }
-    }
+    const targetTab = tabId
+      ? await browser.tabs.get(tabId)
+      : (await browser.tabs.query({ active: true, currentWindow: true }))[0];
+    const shot = await captureTabImage(targetTab, options);
+    return {
+      success: true,
+      data: shot.dataUrl,
+      type: shot.type,
+      method: shot.method,
+      ...(shot.note ? { note: shot.note } : {}),
+      tab: { id: targetTab.id, url: targetTab.url, title: targetTab.title },
+      wasFocused: shot.method === "focus-switch"
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
 }
 
-// Screenshot all tabs (cycles through them)
+// Largest full-page capture we attempt, in CSS pixels (Firefox canvas limits).
+const MAX_FULL_PAGE_HEIGHT = 16000;
+
+// Capture a tab while disturbing the user as little as possible:
+//   1. tabs.captureTab (Firefox 59+) renders any tab, active or not, with no
+//      focus change. It also supports a rect, which gives real full-page shots.
+//   2. If the tab is already the visible tab of its window (e.g. in the
+//      workspace window), captureVisibleTab on that window.
+//   3. Last resort: briefly activate the tab, capture, then restore the
+//      window's previous tab and the previously focused window.
+async function captureTabImage(tab, options = {}) {
+  const imageOpts = { format: options.format || "png", quality: options.quality || 90 };
+
+  if (typeof browser.tabs.captureTab === "function") {
+    if (options.fullPage) {
+      try {
+        const dims = await browser.tabs.sendMessage(tab.id, { action: "captureFullPage" });
+        const height = Math.min(dims.scrollHeight, MAX_FULL_PAGE_HEIGHT);
+        const dataUrl = await browser.tabs.captureTab(tab.id, {
+          ...imageOpts,
+          rect: { x: 0, y: 0, width: dims.scrollWidth, height }
+        });
+        const note = dims.scrollHeight > height
+          ? `Page is ${dims.scrollHeight}px tall; capture truncated at ${height}px.` : undefined;
+        return { dataUrl, type: "fullPage", method: "captureTab", note };
+      } catch (e) {
+        // Fall through to a visible-area capture.
+        console.warn("[ClaudeCodeBrowser] Full-page capture failed:", e);
+      }
+    }
+    try {
+      const dataUrl = await browser.tabs.captureTab(tab.id, imageOpts);
+      return {
+        dataUrl, type: "visible", method: "captureTab",
+        note: options.fullPage ? "Full-page capture failed; returned the visible area." : undefined
+      };
+    } catch (e) {
+      console.warn("[ClaudeCodeBrowser] captureTab failed, falling back:", e);
+    }
+  }
+
+  const note = options.fullPage ? "Full-page capture unsupported here; returned the visible area." : undefined;
+
+  if (tab.active) {
+    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, imageOpts);
+    return { dataUrl, type: "visible", method: "captureVisibleTab", note };
+  }
+
+  // Temporarily switch tabs, then put everything back the way the user had it.
+  const [previousTab] = await browser.tabs.query({ active: true, windowId: tab.windowId });
+  const focusedWindow = await lastFocusedNormalWindow();
+  try {
+    await browser.tabs.update(tab.id, { active: true });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, imageOpts);
+    return { dataUrl, type: "visible", method: "focus-switch", note };
+  } finally {
+    if (previousTab && previousTab.id !== tab.id) {
+      await browser.tabs.update(previousTab.id, { active: true }).catch(() => {});
+    }
+    const nowFocused = await lastFocusedNormalWindow();
+    if (focusedWindow && focusedWindow.focused && nowFocused && nowFocused.id !== focusedWindow.id) {
+      await browser.windows.update(focusedWindow.id, { focused: true }).catch(() => {});
+    }
+  }
+}
+
+// Screenshot several tabs. Defaults to the workspace's tabs; the user's own
+// tabs are included only with includeUserTabs.
 async function screenshotAllTabs(options = {}) {
   try {
-    const tabs = await browser.tabs.query({});
-    const currentTab = (await browser.tabs.query({ active: true, currentWindow: true }))[0];
-    const results = [];
-
-    // Filter tabs by URL pattern if provided
-    let targetTabs = tabs.filter(t => !t.url.startsWith('about:') && !t.url.startsWith('moz-extension:'));
+    let targetTabs = (await scopedTabs(options))
+      .filter(t => !t.url.startsWith('about:') && !t.url.startsWith('moz-extension:'));
 
     if (options.urlPattern) {
       const regex = new RegExp(options.urlPattern);
       targetTabs = targetTabs.filter(t => regex.test(t.url));
     }
 
+    const results = [];
     for (const tab of targetTabs) {
       try {
-        // Focus the tab
-        await browser.tabs.update(tab.id, { active: true });
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        // Take screenshot
-        const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, {
-          format: options.format || "png",
-          quality: options.quality || 90
-        });
-
+        const shot = await captureTabImage(tab, options);
         results.push({
           success: true,
           tabId: tab.id,
           url: tab.url,
           title: tab.title,
-          data: options.includeData ? dataUrl : undefined,
+          method: shot.method,
+          data: options.includeData ? shot.dataUrl : undefined,
           timestamp: Date.now()
         });
       } catch (e) {
-        results.push({
-          success: false,
-          tabId: tab.id,
-          url: tab.url,
-          error: e.message
-        });
+        results.push({ success: false, tabId: tab.id, url: tab.url, error: e.message });
       }
-    }
-
-    // Restore original tab
-    if (currentTab) {
-      await browser.tabs.update(currentTab.id, { active: true });
     }
 
     return {
       success: true,
+      scope: options.includeUserTabs ? "all_tabs" : "workspace",
       screenshots: results,
       count: results.filter(r => r.success).length,
       failed: results.filter(r => !r.success).length
@@ -548,29 +835,44 @@ async function performScroll(tabId, data) {
 // Navigation
 async function navigateTo(tabId, data) {
   try {
-    const tab = tabId ? await browser.tabs.get(tabId) : (await browser.tabs.query({ active: true, currentWindow: true }))[0];
+    let tab;
+    if (data.newTab) {
+      // Open a fresh background tab in the agent workspace. Never reuse the
+      // active tab: that is the bug new_tab used to have.
+      tab = await openWorkspaceTab(data.url);
+    } else {
+      tab = tabId ? await browser.tabs.get(tabId) : (await browser.tabs.query({ active: true, currentWindow: true }))[0];
+      await browser.tabs.update(tab.id, { url: data.url });
+    }
 
-    await browser.tabs.update(tab.id, { url: data.url });
-
-    // Wait for page to load
-    return new Promise((resolve) => {
-      const listener = (updatedTabId, changeInfo) => {
-        if (updatedTabId === tab.id && changeInfo.status === "complete") {
-          browser.tabs.onUpdated.removeListener(listener);
-          resolve({ success: true, url: data.url });
-        }
-      };
-      browser.tabs.onUpdated.addListener(listener);
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
-        browser.tabs.onUpdated.removeListener(listener);
-        resolve({ success: true, url: data.url, note: "Navigation initiated but completion not confirmed" });
-      }, 30000);
-    });
+    const loaded = data.url === "about:blank" || await waitForTabLoad(tab.id, 30000);
+    const result = { success: true, url: data.url, tabId: tab.id, newTab: !!data.newTab };
+    if (!loaded) result.note = "Navigation initiated but completion not confirmed";
+    return result;
   } catch (error) {
     return { success: false, error: error.message };
   }
+}
+
+// Resolve true once the tab finishes loading a real page, false on timeout.
+function waitForTabLoad(tabId, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      browser.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const listener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete" && tab.url !== "about:blank") {
+        finish(true);
+      }
+    };
+    browser.tabs.onUpdated.addListener(listener);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 // Get page information
@@ -667,8 +969,14 @@ async function getAllTabs(options = {}) {
     const urlPattern = options.url_pattern ? new RegExp(options.url_pattern) : null;
     const limit = Number.isInteger(options.limit) ? options.limit : 50;
 
-    const queryOpts = currentWindowOnly ? { currentWindow: true } : {};
-    let tabs = await browser.tabs.query(queryOpts);
+    await pruneWorkspace();
+    let tabs = await browser.tabs.query({});
+    if (currentWindowOnly) {
+      // The current window plus the workspace (which may be its own window).
+      const current = await browser.tabs.query({ currentWindow: true });
+      const currentWindowId = current.length ? current[0].windowId : null;
+      tabs = tabs.filter(t => t.windowId === currentWindowId || workspace.tabIds.has(t.id));
+    }
     const windows = await browser.windows.getAll();
     const windowMap = new Map(windows.map(w => [w.id, w]));
 
@@ -692,7 +1000,8 @@ async function getAllTabs(options = {}) {
           windowId: t.windowId,
           pinned: t.pinned,
           status: t.status,  // "loading" or "complete"
-          audible: t.audible  // playing audio
+          audible: t.audible,  // playing audio
+          inWorkspace: workspace.tabIds.has(t.id)
         };
         if (includeFavicon) {
           base.favIconUrl = t.favIconUrl;
@@ -705,6 +1014,7 @@ async function getAllTabs(options = {}) {
       returnedTabs: pageTabs.length,
       truncated,
       scope: currentWindowOnly ? 'current_window' : 'all_windows',
+      workspace: workspaceInfo(),
       windowCount: windows.length,
       totalTabs: totalMatched,
       summary: {
@@ -805,13 +1115,16 @@ async function findTabs(options) {
 
 async function createNewTab(data) {
   try {
-    const tab = await browser.tabs.create({
-      url: data.url || "about:blank",
-      active: data.active !== false
-    });
+    // Agent tabs live in the workspace and open in the background. Only an
+    // explicit active:true brings the tab to the front.
+    const tab = await openWorkspaceTab(data.url || "about:blank");
+    if (data.active === true) {
+      await browser.tabs.update(tab.id, { active: true });
+    }
     return {
       success: true,
-      tab: { id: tab.id, url: tab.url, title: tab.title }
+      tab: { id: tab.id, url: tab.url, title: tab.title },
+      workspace: workspaceInfo()
     };
   } catch (error) {
     return { success: false, error: error.message };
@@ -883,7 +1196,7 @@ async function hardRefreshTab(tabId) {
 // Reload all tabs (useful when restarting dev servers)
 async function reloadAllTabs(options = {}) {
   try {
-    const tabs = await browser.tabs.query({});
+    const tabs = await scopedTabs(options);
     const results = [];
 
     for (const tab of tabs) {
@@ -906,6 +1219,7 @@ async function reloadAllTabs(options = {}) {
 
     return {
       success: true,
+      scope: options.includeUserTabs ? "all_tabs" : "workspace",
       reloadedCount: results.length,
       tabs: results,
       bypassCache: options.bypassCache || false
@@ -922,7 +1236,7 @@ async function reloadTabsByUrl(options) {
       return { success: false, error: "Must provide url or urlPattern" };
     }
 
-    const tabs = await browser.tabs.query({});
+    const tabs = await scopedTabs(options);
     const results = [];
 
     for (const tab of tabs) {
@@ -945,6 +1259,7 @@ async function reloadTabsByUrl(options) {
 
     return {
       success: true,
+      scope: options.includeUserTabs ? "all_tabs" : "workspace",
       reloadedCount: results.length,
       tabs: results,
       bypassCache: options.bypassCache !== false

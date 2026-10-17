@@ -163,7 +163,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."},
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."},
                 "full_page": {"type": "boolean", "description": "Capture full page instead of visible area.", "default": False},
                 "save_to_file": {"type": "boolean", "description": "Save screenshot to file.", "default": True},
                 "filename": {"type": "string", "description": "Optional filename for saved screenshot."}
@@ -181,7 +181,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "text": {"type": "string", "description": "Text content to search for and click."},
                 "x": {"type": "number", "description": "X coordinate to click."},
                 "y": {"type": "number", "description": "Y coordinate to click."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."},
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."},
                 "double_click": {"type": "boolean", "description": "Perform double-click.", "default": False},
                 "right_click": {"type": "boolean", "description": "Perform right-click.", "default": False}
             }
@@ -199,7 +199,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "placeholder": {"type": "string", "description": "Placeholder text to find the input."},
                 "name": {"type": "string", "description": "Name attribute of the input."},
                 "id": {"type": "string", "description": "ID of the input element."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."},
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."},
                 "clear": {"type": "boolean", "description": "Clear existing content first.", "default": False},
                 "press_enter": {"type": "boolean", "description": "Press Enter after typing.", "default": False},
                 "delay": {"type": "integer", "description": "Delay between keystrokes in ms.", "default": 50}
@@ -216,20 +216,20 @@ MCP_TOOLS: List[MCPTool] = [
                 "amount": {"type": "integer", "description": "Scroll amount in pixels.", "default": 300},
                 "selector": {"type": "string", "description": "CSS selector for scrollable element."},
                 "to_element": {"type": "string", "description": "CSS selector of element to scroll into view."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
     MCPTool(
         name="browser_navigate",
-        description="Navigate to a URL in the browser.",
+        description="Navigate to a URL. Without tab_id this navigates the current tab of the agent workspace (a 'Claude' tab group, created on first use). With new_tab=true it opens a new background tab in the workspace and returns its tabId.",
         input_schema={
             "type": "object",
             "required": ["url"],
             "properties": {
                 "url": {"type": "string", "description": "URL to navigate to."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID. Creates new tab if not specified."},
-                "new_tab": {"type": "boolean", "description": "Open URL in new tab.", "default": False}
+                "tab_id": {"type": "integer", "description": "Optional tab ID to navigate. If not specified, uses the current tab of the agent workspace."},
+                "new_tab": {"type": "boolean", "description": "Open the URL in a new background tab in the agent workspace (does not steal focus).", "default": False}
             }
         }
     ),
@@ -239,7 +239,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -252,7 +252,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector to find elements."},
                 "limit": {"type": "integer", "description": "Maximum elements to return.", "default": 50},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -266,7 +266,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "selector": {"type": "string", "description": "CSS selector for the element."},
                 "timeout": {"type": "integer", "description": "Maximum wait time in ms.", "default": 10000},
                 "visible": {"type": "boolean", "description": "Wait for element to be visible.", "default": True},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -280,7 +280,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "selector": {"type": "string", "description": "CSS selector for the element."},
                 "duration": {"type": "integer", "description": "Highlight duration in ms.", "default": 3000},
                 "label": {"type": "string", "description": "Label to show above the element."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -292,13 +292,13 @@ MCP_TOOLS: List[MCPTool] = [
             "required": ["script"],
             "properties": {
                 "script": {"type": "string", "description": "JavaScript code to execute."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
     MCPTool(
         name="browser_get_tabs",
-        description="Get list of open browser tabs (URL, title, active status, loading state, whether playing audio). Defaults to the current window and a max of 50 tabs to keep results small when many tabs are open — pass current_window_only=false to see every window, or url_pattern to filter.",
+        description="Get list of open browser tabs (URL, title, active status, loading state, whether playing audio). Defaults to the current window and a max of 50 tabs to keep results small when many tabs are open — pass current_window_only=false to see every window, or url_pattern to filter. Agent workspace tabs are always listed and flagged inWorkspace; the result also describes the workspace. To act on one of the user's own tabs, pass its id as tab_id explicitly.",
         input_schema={
             "type": "object",
             "properties": {
@@ -336,23 +336,46 @@ MCP_TOOLS: List[MCPTool] = [
     ),
     MCPTool(
         name="browser_screenshot_all_tabs",
-        description="Take screenshots of all open tabs (or filtered by URL pattern). Cycles through tabs and restores original focus.",
+        description="Take screenshots of all agent workspace tabs (or the user's tabs too, with include_user_tabs), optionally filtered by URL pattern. Captures background tabs without switching to them where Firefox allows.",
         input_schema={
             "type": "object",
             "properties": {
                 "url_pattern": {"type": "string", "description": "Regex pattern to filter which tabs to screenshot."},
+                "include_user_tabs": {"type": "boolean", "description": "Also act on the user's own tabs, not just the agent workspace's. Only set this when the user asked for it.", "default": False},
                 "include_data": {"type": "boolean", "description": "Return the screenshots themselves (as images over MCP, base64 over HTTP). Otherwise only per-tab status is returned.", "default": False}
             }
         }
     ),
     MCPTool(
         name="browser_create_tab",
-        description="Create a new browser tab.",
+        description="Create a new tab in the agent workspace. It opens in the background without stealing the user's focus, and becomes the workspace's current tab.",
         input_schema={
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "URL to open in the new tab.", "default": "about:blank"},
-                "active": {"type": "boolean", "description": "Make the new tab active.", "default": True}
+                "active": {"type": "boolean", "description": "Bring the new tab to the front (switches the user's view). Leave false unless the user asked to see it.", "default": False}
+            }
+        }
+    ),
+    MCPTool(
+        name="browser_create_workspace",
+        description="Open the agent workspace: a 'Claude' tab group in the user's window (or a separate window on Firefox without tab groups) where the agent works without touching the user's other tabs. Created automatically on first use; call this to choose the mode or starting URL. Returns the workspace's tab ids. Idempotent.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "URL for the workspace's first tab.", "default": "about:blank"},
+                "mode": {"type": "string", "enum": ["auto", "group", "window"], "default": "auto",
+                         "description": "'group' = tab group in the user's window, 'window' = separate window (best for screenshots that never disturb the user), 'auto' = group if supported."}
+            }
+        }
+    ),
+    MCPTool(
+        name="browser_close_workspace",
+        description="Close the agent workspace and all its tabs (or, with keep_tabs, ungroup them and leave them open for the user).",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "keep_tabs": {"type": "boolean", "description": "Leave the tabs open, just stop treating them as the workspace.", "default": False}
             }
         }
     ),
@@ -386,7 +409,7 @@ MCP_TOOLS: List[MCPTool] = [
             "required": ["selector"],
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector for the input element."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -399,7 +422,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector for the input element."},
                 "value": {"type": "string", "description": "Value to set."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -414,7 +437,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "value": {"type": "string", "description": "Option value to select."},
                 "text": {"type": "string", "description": "Option text to select."},
                 "index": {"type": "integer", "description": "Option index to select."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -426,7 +449,7 @@ MCP_TOOLS: List[MCPTool] = [
             "required": ["selector"],
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector for the element."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -436,7 +459,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, refreshes active tab."},
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, refreshes the current tab of the agent workspace."},
                 "bypass_cache": {"type": "boolean", "description": "Hard refresh - bypass browser cache (like Ctrl+Shift+R).", "default": False},
                 "wait_for_load": {"type": "boolean", "description": "Wait for page to fully load after refresh.", "default": True}
             }
@@ -448,7 +471,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, refreshes active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, refreshes the current tab of the agent workspace."}
             }
         }
     ),
@@ -459,7 +482,8 @@ MCP_TOOLS: List[MCPTool] = [
             "type": "object",
             "properties": {
                 "url_pattern": {"type": "string", "description": "Regex pattern to filter which tabs to reload (e.g., 'localhost' or 'ligandal\\.com')."},
-                "bypass_cache": {"type": "boolean", "description": "Hard refresh all matching tabs.", "default": True}
+                "bypass_cache": {"type": "boolean", "description": "Hard refresh all matching tabs.", "default": True},
+                "include_user_tabs": {"type": "boolean", "description": "Also act on the user's own tabs, not just the agent workspace's. Only set this when the user asked for it.", "default": False}
             }
         }
     ),
@@ -471,7 +495,8 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "url": {"type": "string", "description": "URL prefix to match (e.g., 'http://localhost:5000')."},
                 "url_pattern": {"type": "string", "description": "Regex pattern to match URLs."},
-                "bypass_cache": {"type": "boolean", "description": "Hard refresh matching tabs.", "default": True}
+                "bypass_cache": {"type": "boolean", "description": "Hard refresh matching tabs.", "default": True},
+                "include_user_tabs": {"type": "boolean", "description": "Also act on the user's own tabs, not just the agent workspace's. Only set this when the user asked for it.", "default": False}
             }
         }
     ),
@@ -486,7 +511,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "timeout": {"type": "integer", "description": "Max time to wait in ms.", "default": 10000},
                 "change_type": {"type": "string", "enum": ["childList", "attributes", "text"], "description": "Type of change to wait for."},
                 "subtree": {"type": "boolean", "description": "Observe child elements too.", "default": True},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -498,7 +523,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "timeout": {"type": "integer", "description": "Max time to wait in ms.", "default": 10000},
                 "idle_time": {"type": "integer", "description": "How long network must be idle (ms).", "default": 500},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -511,7 +536,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "selector": {"type": "string", "description": "CSS selector of element to observe."},
                 "observer_id": {"type": "string", "description": "ID for this observer (to stop it later)."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -523,7 +548,7 @@ MCP_TOOLS: List[MCPTool] = [
             "required": ["observer_id"],
             "properties": {
                 "observer_id": {"type": "string", "description": "ID of the observer to stop."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -537,7 +562,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "delay": {"type": "integer", "description": "Delay between scrolls in ms.", "default": 500},
                 "max_scrolls": {"type": "integer", "description": "Maximum number of scroll steps.", "default": 20},
                 "restore": {"type": "boolean", "description": "Restore original scroll position after.", "default": True},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -553,7 +578,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "wait_timeout": {"type": "integer", "description": "Max time to wait for changes in ms.", "default": 5000},
                 "wait_for_selector": {"type": "string", "description": "Wait for specific element to appear after click."},
                 "wait_for_change": {"type": "boolean", "description": "Wait for any DOM change.", "default": True},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -565,7 +590,7 @@ MCP_TOOLS: List[MCPTool] = [
             "type": "object",
             "properties": {
                 "clear_existing": {"type": "boolean", "description": "Clear any existing logs before starting.", "default": False},
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -575,7 +600,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -588,7 +613,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "level": {"type": "string", "enum": ["log", "warn", "error", "info", "debug"], "description": "Filter by log level."},
                 "search": {"type": "string", "description": "Filter logs containing this text."},
                 "limit": {"type": "integer", "description": "Maximum number of logs to return.", "default": 100},
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -603,7 +628,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "status": {"type": "integer", "description": "Filter by HTTP status code."},
                 "errors_only": {"type": "boolean", "description": "Only return failed requests.", "default": False},
                 "limit": {"type": "integer", "description": "Maximum number of logs to return.", "default": 100},
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -615,7 +640,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "console": {"type": "boolean", "description": "Clear console logs.", "default": True},
                 "network": {"type": "boolean", "description": "Clear network logs.", "default": True},
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -645,7 +670,7 @@ MCP_TOOLS: List[MCPTool] = [
                         }
                     }
                 },
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -663,7 +688,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "action_script": {"type": "string", "description": "JS to run once condition is met."},
                 "poll_interval_ms": {"type": "integer", "default": 200, "description": "How often to check condition."},
                 "timeout_ms": {"type": "integer", "default": 15000, "description": "Max wait time before giving up."},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -674,7 +699,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -684,7 +709,7 @@ MCP_TOOLS: List[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses active tab."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -701,7 +726,7 @@ MCP_TOOLS: List[MCPTool] = [
                 "shift": {"type": "boolean", "description": "Hold Shift.", "default": False},
                 "alt": {"type": "boolean", "description": "Hold Alt.", "default": False},
                 "meta": {"type": "boolean", "description": "Hold Meta/Cmd.", "default": False},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -713,7 +738,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "selector": {"type": "string", "description": "Optional CSS selector; defaults to the whole page body."},
                 "max_length": {"type": "integer", "description": "Truncate the returned text to this many characters.", "default": 20000},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -782,7 +807,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "timeout": {"type": "integer", "description": "How long to wait for the human to solve it, in ms.", "default": 180000},
                 "detect_only": {"type": "boolean", "description": "Only report whether a captcha is present, without waiting.", "default": False},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -794,7 +819,7 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {
                 "screenshot": {"type": "boolean", "description": "Also capture a screenshot.", "default": True},
                 "full_page": {"type": "boolean", "description": "Make the screenshot full-page.", "default": False},
-                "tab_id": {"type": "integer", "description": "Optional tab ID."}
+                "tab_id": {"type": "integer", "description": "Optional tab ID. If not specified, uses the current tab of the agent workspace (never the user's other tabs)."}
             }
         }
     ),
@@ -928,7 +953,7 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
             self.send_json_response({
                 'status': 'ok',
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.4.0',
+                'version': '1.5.0',
                 'browsers_connected': len(connection_manager.browser_connections)
             })
 
@@ -1079,6 +1104,8 @@ class MCPHTTPHandler(BaseHTTPRequestHandler):
             'browser_find_tabs': 'findTabs',
             'browser_screenshot_all_tabs': 'screenshotAllTabs',
             'browser_create_tab': 'createTab',
+            'browser_create_workspace': 'createWorkspace',
+            'browser_close_workspace': 'closeWorkspace',
             'browser_close_tab': 'closeTab',
             'browser_focus_tab': 'focusTab',
             'browser_get_value': 'getValue',
@@ -1577,7 +1604,7 @@ def main():
     mode_label = "HEADLESS (Playwright)" if HEADLESS_MODE else "EXTENSION (Firefox/native-host)"
     print(f"""
 +--------------------------------------------------------------+
-|           ClaudeCodeBrowser MCP Server v1.4.0                |
+|           ClaudeCodeBrowser MCP Server v1.5.0                |
 +--------------------------------------------------------------+
 |  Mode:             {mode_label:<40} |
 |  HTTP Server:      http://{HOST}:{HTTP_PORT:<5}                       |
