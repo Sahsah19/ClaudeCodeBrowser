@@ -102,6 +102,22 @@ WRAPEOF
     NATIVE_HOST_PATH="$INSTALL_DIR/native-host/run_host.sh"
 fi
 
+# Extension IDs allowed to use the native host: the upstream ID plus any of
+# your own (self-signed builds, see scripts/package-extension.sh). Pass
+# CCB_EXTENSION_ID once; it is remembered for later reinstalls.
+EXTRA_IDS_FILE="$INSTALL_DIR/extension_ids"
+if [ -n "$CCB_EXTENSION_ID" ] && ! grep -qxF "$CCB_EXTENSION_ID" "$EXTRA_IDS_FILE" 2>/dev/null; then
+    echo "$CCB_EXTENSION_ID" >> "$EXTRA_IDS_FILE"
+fi
+ALLOWED_IDS='    "claudecodebrowser@ligandal.com"'
+if [ -f "$EXTRA_IDS_FILE" ]; then
+    while IFS= read -r ext_id; do
+        [ -n "$ext_id" ] && [ "$ext_id" != "claudecodebrowser@ligandal.com" ] && \
+            ALLOWED_IDS="$ALLOWED_IDS,
+    \"$ext_id\""
+    done < "$EXTRA_IDS_FILE"
+fi
+
 cat > "$FIREFOX_NATIVE_MANIFESTS_DIR/claudecodebrowser.json" << EOF
 {
   "name": "claudecodebrowser",
@@ -109,7 +125,7 @@ cat > "$FIREFOX_NATIVE_MANIFESTS_DIR/claudecodebrowser.json" << EOF
   "path": "$NATIVE_HOST_PATH",
   "type": "stdio",
   "allowed_extensions": [
-    "claudecodebrowser@ligandal.com"
+$ALLOWED_IDS
   ]
 }
 EOF

@@ -10,6 +10,13 @@
 #   - Node.js + web-ext            (npm install -g web-ext)
 #   - AMO_JWT_ISSUER / AMO_JWT_SECRET  (from https://addons.mozilla.org/developers/addon/api/key/)
 #
+# Building your own signed copy (e.g. from a fork): the default extension ID
+# belongs to the upstream AMO listing, and AMO only signs an ID for the account
+# that owns it. Set CCB_EXTENSION_ID to an ID of your own (any email-style
+# string, e.g. claudecodebrowser@yourname.github.io) and CCB_REPO_SLUG to your
+# fork; both are stamped into a build copy of the manifest. Then pass the same
+# CCB_EXTENSION_ID to scripts/install.sh so the native host accepts it.
+#
 # A signed .xpi can be installed permanently and — if you set an update_url
 # (see below) — auto-updates. An unsigned .xpi only loads as a temporary
 # add-on via about:debugging, or in Developer/Nightly with
@@ -25,6 +32,7 @@ SIGN=0
 
 VERSION=$(python3 -c "import json; print(json.load(open('$SRC/manifest.json'))['version'])")
 EXT_ID=$(python3 -c "import json; print(json.load(open('$SRC/manifest.json'))['browser_specific_settings']['gecko']['id'])")
+EXT_ID="${CCB_EXTENSION_ID:-$EXT_ID}"
 XPI="$DIST/claudecodebrowser-${VERSION}.xpi"
 
 # Where release assets live. The manifest's update_url points at
@@ -34,6 +42,23 @@ REPO_SLUG="${CCB_REPO_SLUG:-nanogenomic/ClaudeCodeBrowser}"
 XPI_URL="https://github.com/${REPO_SLUG}/releases/download/v${VERSION}/claudecodebrowser-${VERSION}.xpi"
 
 mkdir -p "$DIST"
+
+# Package from a staged copy so the ID / update_url can be customised without
+# touching extension/manifest.json.
+BUILD_SRC="$DIST/build-src"
+rm -rf "$BUILD_SRC"
+mkdir -p "$BUILD_SRC"
+( cd "$SRC" && tar cf - --exclude '.DS_Store' . ) | ( cd "$BUILD_SRC" && tar xf - )
+python3 - "$BUILD_SRC/manifest.json" "$EXT_ID" "https://github.com/${REPO_SLUG}/releases/latest/download/updates.json" << 'PYEOF2'
+import json, sys
+path, ext_id, update_url = sys.argv[1:4]
+manifest = json.load(open(path))
+gecko = manifest['browser_specific_settings']['gecko']
+gecko['id'] = ext_id
+gecko['update_url'] = update_url
+json.dump(manifest, open(path, 'w'), indent=2)
+PYEOF2
+SRC="$BUILD_SRC"
 
 echo "Packaging ClaudeCodeBrowser extension v${VERSION} (${EXT_ID})"
 
@@ -52,8 +77,12 @@ EOF
 echo "Wrote update manifest: $DIST/updates.json"
 
 if [ "$SIGN" = "1" ]; then
-    if ! command -v web-ext &> /dev/null; then
-        echo "Error: web-ext not found. Install it with: npm install -g web-ext" >&2
+    if command -v web-ext &> /dev/null; then
+        WEB_EXT=(web-ext)
+    elif command -v npx &> /dev/null; then
+        WEB_EXT=(npx --yes web-ext@8.3.0)
+    else
+        echo "Error: web-ext not found. Install Node.js, then: npm install -g web-ext" >&2
         exit 1
     fi
     if [ -z "$AMO_JWT_ISSUER" ] || [ -z "$AMO_JWT_SECRET" ]; then
@@ -63,7 +92,7 @@ if [ "$SIGN" = "1" ]; then
     echo "Signing via AMO (channel: unlisted, self-distribution)..."
     # --channel=unlisted signs without a public AMO listing, for self-hosting.
     # Use --channel=listed to submit to the public AMO catalog instead.
-    web-ext sign \
+    "${WEB_EXT[@]}" sign \
         --source-dir "$SRC" \
         --artifacts-dir "$DIST" \
         --channel=unlisted \
@@ -72,6 +101,10 @@ if [ "$SIGN" = "1" ]; then
     # web-ext names the signed file with underscores; normalize to the name
     # the update manifest expects so update_link resolves.
     SIGNED=$(ls -t "$DIST"/*.xpi 2>/dev/null | head -n1)
+    if [ -z "$SIGNED" ]; then
+        echo "Error: signing produced no .xpi (see web-ext output above)." >&2
+        exit 1
+    fi
     if [ -n "$SIGNED" ] && [ "$SIGNED" != "$XPI" ]; then
         cp "$SIGNED" "$XPI"
     fi

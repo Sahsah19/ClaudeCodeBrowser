@@ -317,6 +317,24 @@ Mozilla without a public listing:
 3. Install the signed `.xpi` by opening it in Firefox (drag it onto the
    window, or `about:addons` → gear → *Install Add-on From File*).
 
+**Signing your own build (forks).** The default ID
+`claudecodebrowser@ligandal.com` belongs to the upstream AMO listing, and
+AMO only signs an ID for the account that owns it. To sign a fork, use an ID
+of your own (any email-style string) and point updates at your fork:
+
+```bash
+export CCB_EXTENSION_ID=claudecodebrowser@yourname.github.io
+export CCB_REPO_SLUG=yourname/ClaudeCodeBrowser
+./scripts/package-extension.sh --sign     # ID + update_url stamped into dist/build-src
+CCB_EXTENSION_ID=$CCB_EXTENSION_ID ./scripts/install.sh   # lets the native host accept that ID
+```
+
+`install.sh` remembers extra IDs in `~/.claudecodebrowser/extension_ids`, so
+later reinstalls keep allowing them. Remove any other ClaudeCodeBrowser copy
+(for example the public AMO version) from `about:addons` first. Two copies
+would both connect to the native host and both pick up the server's commands.
+`extension/manifest.json` itself is never modified.
+
 **Auto-update is already wired** to GitHub Releases. The manifest carries:
 
 ```json
